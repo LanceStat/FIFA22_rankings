@@ -1,0 +1,159 @@
+---
+title: "EPL player groupings with clustering and factor analysis"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Data
+
+Data is from the FIFA 22 video game player rankings. These are released every year for most professional players in the world (over 19k in this data set). There are  around 100 attributes that comprise the rankings. In this particlar analysis I will focus on attacking players in the English Premier league. 
+
+```{r, message=FALSE,warning=FALSE}
+library(tidyverse)
+library(stats)
+library(factoextra)
+
+players <- read_csv("players_22.csv")
+```
+
+## Extracting EPL attacking players as well as related attributes
+
+Will need to create a subset of players and attributes needed.
+
+```{r}
+EPL <- players %>%
+  filter(league_name == "English Premier League") %>% 
+  filter(str_detect(player_positions, 'ST|CF|LW|RW')) %>% 
+  select(short_name, club_name, nationality_name,overall, potential, value_eur, wage_eur, age,
+         height_cm, weight_kg, weak_foot, work_rate,
+         skill_moves, pace, shooting, passing, dribbling, defending,
+         physic, attacking_crossing, attacking_finishing, attacking_heading_accuracy,
+         attacking_short_passing, attacking_volleys) %>% 
+  mutate(across(where(is.numeric), scale))
+```
+
+203 players and 24 attributes. 
+
+## Hierarchical clustering
+
+First clustering method. Data is scaled and using euclidean distance.
+
+```{r}
+EPL2 <- EPL %>% 
+  select(where(is.numeric)) %>% 
+  as.data.frame()
+rownames(EPL2) <- EPL$short_name
+
+EPLdist <- dist(EPL2, method = "euclidean")
+HCepl <- hclust(EPLdist, method = "ward.D") 
+plot(HCepl, cex = 0.6)
+```
+
+
+## K-means clustering
+
+Second clustering method. Initiallly using 3 clusters.
+
+```{r}
+EPLk3 <- kmeans(EPL2, centers = 3, nstart = 25)
+fviz_cluster(EPLk3, data = EPL2)  
+
+```
+
+
+What are the optimal number of clusters?
+
+```{r}
+fviz_nbclust(EPL2, kmeans, method = "wss")
+```
+
+4 possibly? The sum of squares seems to not reduce as quickly after 4. 
+
+```{r}
+EPLk3 <- kmeans(EPL2, centers = 4, nstart = 25)
+fviz_cluster(EPLk3, data = EPL2)
+```
+
+Now this looks interesting. See your favorite player? 
+
+## Factor Analysis
+
+Lets see what factors are important for this group.
+
+```{r}
+EPLfact <- players %>%
+  filter(league_name == "English Premier League") %>% 
+  filter(str_detect(player_positions, 'ST|CF|LW|RW')) %>% 
+  select(short_name, club_name, nationality_name,overall, potential, value_eur, wage_eur, age,
+         height_cm, weight_kg, weak_foot, work_rate,
+         skill_moves, pace, shooting, passing, dribbling, defending,
+         physic, attacking_crossing, attacking_finishing, attacking_heading_accuracy,
+         attacking_short_passing, attacking_volleys)
+
+EPLfact <- EPLfact %>% 
+  select(where(is.numeric)) %>% 
+  as.data.frame()
+
+rownames(EPLfact) <- EPL$short_name
+```
+
+
+Optimal number of factors
+
+```{r}
+fa_size <- lapply(1:14, function(f) factanal(EPLfact, f, lower = 0.05))
+pvals <- lapply(1:14, function(f) factanal(EPLfact, f, lower = 0.05)$PVAL)
+pvals
+```
+
+Looks like 9.  Now we can see the factor loadings.
+
+```{r}
+fa_size[[9]]$loadings
+```
+
+This is interesting. Factor 1 could be called "passing", factor 2 could be called "finising", factor 3 is physicality and heading, factor 4 is height at weight attributes. 
+
+Lets try and visualize this
+
+```{r}
+factanal(EPLfact, factors = 9, lower = 0.05, scores = "regression")$scores %>%
+bind_cols(Player = rownames(EPLfact)) %>%
+slice(1:100) %>%
+ggplot(aes(Factor1, Factor2, label = Player)) +
+geom_text() +
+  xlab("Factor 1 - Passing") +
+  ylab("Factor 2 - Finishing")
+```
+
+This is definitely more interesting when the view is expanded on a larger screen. 
+
+Here are some other factors
+
+```{r}
+factanal(EPLfact, factors = 9, lower = 0.05, scores = "regression")$scores %>%
+bind_cols(Player = rownames(EPLfact)) %>%
+slice(1:100) %>%
+ggplot(aes(Factor1, Factor3, label = Player)) +
+geom_text() + 
+  xlab("Factor 1 - Passing")+
+  ylab("Factor 3 - Physical")
+```
+
+
+
+```{r}
+factanal(EPLfact, factors = 9, lower = 0.05, scores = "regression")$scores %>%
+bind_cols(Player = rownames(EPLfact)) %>%
+slice(1:100) %>%
+ggplot(aes(Factor2, Factor3, label = Player)) +
+geom_text() +
+  xlab("Factor 2 - Finishing") +
+  ylab("Factor 3 - Physical")
+```
+
+Its pretty interesting to see how the players fall on the scale when comparing their playing style. This can be continued with more factors like speed (factor 6) or potential (factor 7). It would be cool to see this over a number of years. 
